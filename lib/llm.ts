@@ -249,7 +249,7 @@ const generateReplyWithOpenRouter = async (
           headers: {
             Authorization: `Bearer ${apiKey}`,
             "Content-Type": "application/json",
-            "HTTP-Referer": "https://reach-one.vercel.app",
+            "HTTP-Referer": "https://reach-one-murex.vercel.app",
             "X-Title": "ReachOne Email Assistant",
           },
           body: JSON.stringify({
