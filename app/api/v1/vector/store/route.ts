@@ -14,9 +14,14 @@ export async function POST(request: Request) {
   try {
     await initVectorSpace();
     const embedding = await generateEmbedding(text);
-    await addVector(embedding, nextId++);
+    const currentId = nextId++;
+    await addVector(embedding, currentId, text);
 
-    return NextResponse.json({ message: "Agenda stored successfully" });
+    return NextResponse.json({ 
+      message: "Agenda stored successfully",
+      id: currentId,
+      text: text
+    });
   } catch (error) {
     return NextResponse.json(
       { error: (error as Error).message },

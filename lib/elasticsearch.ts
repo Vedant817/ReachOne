@@ -1,24 +1,25 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { Client } from "@elastic/elasticsearch";
-import dotenv from "dotenv";
 
-dotenv.config();
+export const createClient = (elasticsearchHosts: string) => {
+  return new Client({ node: elasticsearchHosts });
+};
 
-const elasticsearchClient = new Client({
-  node: process.env.ELASTICSEARCH_HOSTS || "http://localhost:9200",
-});
-
-export const createIndex = async (indexName: string) => {
-  const indexExists = await elasticsearchClient.indices.exists({
+export const createIndex = async (
+  indexName: string,
+  client: any,
+) => {
+  const indexExists = await client.indices.exists({
     index: indexName,
   });
   if (!indexExists) {
-    await elasticsearchClient.indices.create({ index: indexName });
+    await client.indices.create({ index: indexName });
     console.log(`Index "${indexName}" created.`);
   }
 };
 
-export const indexEmail = async (indexName: string, email: any) => {
-  await elasticsearchClient.index({
+export const indexEmail = async (indexName: string, email: any, client: any) => {
+  await client.index({
     index: indexName,
     body: email,
   });

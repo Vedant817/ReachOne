@@ -1,21 +1,18 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { WebClient } from "@slack/web-api";
-import dotenv from "dotenv";
 
-dotenv.config();
-
-const slackToken = process.env.SLACK_TOKEN;
-const slackChannel = process.env.SLACK_CHANNEL || "#general";
-const webhookUrl = process.env.WEBHOOK_URL;
-
-const web = new WebClient(slackToken);
-
-export const sendSlackNotification = async (message: string) => {
+export const sendSlackNotification = async (
+  message: string,
+  slackToken: string,
+  slackChannel: string = "#general",
+) => {
   if (!slackToken) {
-    console.error("Slack token not configured.");
+    console.error("Slack token not provided.");
     return;
   }
 
   try {
+    const web = new WebClient(slackToken);
     await web.chat.postMessage({
       channel: slackChannel,
       text: message,
@@ -26,9 +23,12 @@ export const sendSlackNotification = async (message: string) => {
   }
 };
 
-export const sendWebhookNotification = async (data: any) => {
+export const sendWebhookNotification = async (
+  data: any,
+  webhookUrl: string,
+) => {
   if (!webhookUrl) {
-    console.error("Webhook URL not configured.");
+    console.error("Webhook URL not provided.");
     return;
   }
 

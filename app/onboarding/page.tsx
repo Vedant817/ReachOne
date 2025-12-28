@@ -16,6 +16,7 @@ export default function OnboardingPage() {
     slackToken: "",
     slackChannel: "#general",
     webhookUrl: "",
+    openrouterApiKey: "",
     huggingfaceApiKey: "",
     elasticsearchHosts: "http://localhost:9200",
   });
@@ -30,7 +31,7 @@ export default function OnboardingPage() {
     e.preventDefault();
     setError("");
 
-    if (!formData.imapUser || !formData.imapPassword || !formData.slackToken) {
+    if (!formData.imapUser || !formData.imapPassword || !formData.slackToken || !formData.openrouterApiKey) {
       setError("Please fill in all required fields");
       return;
     }
@@ -216,6 +217,35 @@ export default function OnboardingPage() {
               AI Configuration
             </h3>
             <div className="space-y-4">
+              <div>
+                <label
+                  htmlFor="openrouterApiKey"
+                  className="block text-sm font-medium text-gray-700"
+                >
+                  OpenRouter API Key *
+                </label>
+                <input
+                  type="password"
+                  id="openrouterApiKey"
+                  name="openrouterApiKey"
+                  required
+                  className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
+                  value={formData.openrouterApiKey}
+                  onChange={handleChange}
+                />
+                <p className="mt-1 text-xs text-gray-500">
+                  Required for AI reply generation. Get your key from{" "}
+                  <a
+                    href="https://openrouter.ai/keys"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-blue-600 hover:text-blue-500"
+                  >
+                    openrouter.ai
+                  </a>
+                </p>
+              </div>
+
               <div>
                 <label
                   htmlFor="huggingfaceApiKey"

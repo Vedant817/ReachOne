@@ -1,71 +1,97 @@
 import Imap from "node-imap";
 import { simpleParser, ParsedMail } from "mailparser";
-import dotenv from "dotenv";
-import { createIndex, indexEmail } from "./elasticsearch";
+import { Client } from "@elastic/elasticsearch";
 import { categorizeEmail } from "./ai";
 import { sendSlackNotification, sendWebhookNotification } from "./integration";
 
-dotenv.config();
-
-const imapConfig: Imap.Config = {
-  user: process.env.IMAP_USER || "",
-  password: process.env.IMAP_PASSWORD || "",
-  host: process.env.IMAP_HOST || "",
-  port: 993,
-  tls: true,
-  tlsOptions: {
-    rejectUnauthorized: false,
-  },
-};
-
-export const startIdle = () => {
-  const imap = new Imap(imapConfig);
-
-  const openInbox = (cb: (err: Error, box: Imap.Box) => void) => {
-    imap.openBox("INBOX", false, cb);
+export const startIdle = (
+  imapUser: string,
+  imapPassword: string,
+  imapHost: string,
+  elasticsearchHosts: string,
+  slackToken?: string,
+  slackChannel?: string,
+  webhookUrl?: string,
+): Promise<void> => {
+  const imapConfig: Imap.Config = {
+    user: imapUser,
+    password: imapPassword,
+    host: imapHost,
+    port: 993,
+    tls: true,
+    tlsOptions: {
+      rejectUnauthorized: false,
+    },
   };
 
-  imap.once("ready", () => {
-    openInbox(async (err, box) => {
-      if (err) throw err;
-      console.log("Inbox opened. Listening for new emails...");
+  const imap = new Imap(imapConfig);
+  const elasticsearchClient = new Client({ node: elasticsearchHosts });
 
-      imap.on("mail", (numNewMsgs: number) => {
-        console.log(`New email received! You have ${numNewMsgs} new messages.`);
-        // Fetch new emails
-        const f = imap.seq.fetch(box.messages.total + ":*", { bodies: "" });
-        f.on("message", (msg, seqno) => {
-          console.log("Message #%d", seqno);
-          const prefix = "(#" + seqno + ") ";
-          msg.on("body", (stream, info) => {
-            const buffer: Buffer[] = [];
-            stream.on("data", (chunk) => {
-              buffer.push(chunk);
-            });
-            stream.on("end", () => {
-              const fullBuffer = Buffer.concat(buffer);
-              simpleParser(fullBuffer, async (err, mail) => {
-                if (err) {
-                  console.error(prefix + "Error parsing email:", err);
-                } else {
-                  console.log(prefix + "Parsed email:", mail.subject);
-                  const category = categorizeEmail(mail);
-                  const emailWithCategory = { ...mail, category };
-                  const indexName = "emails";
-                  await createIndex(indexName);
-                  await indexEmail(indexName, emailWithCategory);
-                  console.log(
-                    prefix + "Email indexed successfully with category:",
-                    category,
-                  );
+  return new Promise((resolve, reject) => {
+    const openInbox = (cb: (err: Error, box: Imap.Box) => void) => {
+      imap.openBox("INBOX", false, cb);
+    };
 
-                  if (category === "Interested") {
-                    await sendSlackNotification(
-                      `New interested email from: ${mail.from?.text}`,
+    imap.once("ready", () => {
+      openInbox(async (err, box) => {
+        if (err) {
+          reject(err);
+          return;
+        }
+        console.log("Inbox opened. Listening for new emails...");
+
+        imap.on("mail", (numNewMsgs: number) => {
+          console.log(`New email received! You have ${numNewMsgs} new messages.`);
+          const f = imap.seq.fetch(box.messages.total + ":*", { bodies: "" });
+          f.on("message", (msg, seqno) => {
+            console.log("Message #%d", seqno);
+            const prefix = "(#" + seqno + ") ";
+            msg.on("body", (stream) => {
+              const buffer: Buffer[] = [];
+              stream.on("data", (chunk) => {
+                buffer.push(chunk);
+              });
+              stream.on("end", async () => {
+                const fullBuffer = Buffer.concat(buffer);
+                simpleParser(fullBuffer, async (err, mail) => {
+                  if (err) {
+                    console.error(prefix + "Error parsing email:", err);
+                  } else {
+                    console.log(prefix + "Parsed email:", mail.subject);
+                    const category = categorizeEmail(mail);
+                    const emailWithCategory = { ...mail, category };
+                    const indexName = "emails";
+
+                    const indexExists = await elasticsearchClient.indices.exists({
+                      index: indexName,
+                    });
+                    if (!indexExists) {
+                      await elasticsearchClient.indices.create({ index: indexName });
+                    }
+
+                    await elasticsearchClient.index({
+                      index: indexName,
+                      body: emailWithCategory,
+                    });
+                    console.log(
+                      prefix + "Email indexed successfully with category:",
+                      category,
                     );
-                    await sendWebhookNotification(emailWithCategory);
+
+                    if (category === "Interested") {
+                      if (slackToken) {
+                        await sendSlackNotification(
+                          `New interested email from: ${mail.from?.text}`,
+                          slackToken,
+                          slackChannel || "#general",
+                        );
+                      }
+                      if (webhookUrl) {
+                        await sendWebhookNotification(emailWithCategory, webhookUrl);
+                      }
+                    }
                   }
-                }
+                });
               });
             });
             msg.once("end", () => {
@@ -80,25 +106,46 @@ export const startIdle = () => {
           });
         });
       });
-    })
-  });
+    });
 
-  imap.once("error", (err) => {
-    console.log("IMAP error:", err);
-  });
+    imap.once("error", (err) => {
+      reject(err);
+    });
 
-  imap.once("end", () => {
-    console.log("Connection ended");
-  });
+    imap.once("end", () => {
+      console.log("Connection ended");
+      resolve();
+    });
 
-  imap.connect();
+    imap.connect();
+  });
 };
 
-export const fetchEmails = (): Promise<ParsedMail[]> => {
-  return new Promise((resolve, reject) => {
-    const imap = new Imap(imapConfig);
-    const emails: ParsedMail[] = [];
+export const fetchEmails = (
+  imapUser: string,
+  imapPassword: string,
+  imapHost: string,
+  elasticsearchHosts: string,
+  slackToken?: string,
+  slackChannel?: string,
+  webhookUrl?: string,
+): Promise<ParsedMail[]> => {
+  const imapConfig: Imap.Config = {
+    user: imapUser,
+    password: imapPassword,
+    host: imapHost,
+    port: 993,
+    tls: true,
+    tlsOptions: {
+      rejectUnauthorized: false,
+    },
+  };
 
+  const imap = new Imap(imapConfig);
+  const emails: ParsedMail[] = [];
+  const elasticsearchClient = new Client({ node: elasticsearchHosts });
+
+  return new Promise((resolve, reject) => {
     const openInbox = (cb: (err: Error, box: Imap.Box) => void) => {
       imap.openBox("INBOX", false, cb);
     };
@@ -129,12 +176,12 @@ export const fetchEmails = (): Promise<ParsedMail[]> => {
           f.on("message", (msg, seqno) => {
             console.log("Message #%d", seqno);
             const prefix = "(#" + seqno + ") ";
-            msg.on("body", (stream, info) => {
+            msg.on("body", (stream) => {
               const buffer: Buffer[] = [];
               stream.on("data", (chunk) => {
                 buffer.push(chunk);
               });
-              stream.on("end", () => {
+              stream.on("end", async () => {
                 const fullBuffer = Buffer.concat(buffer);
                 simpleParser(fullBuffer, async (err, mail) => {
                   if (err) {
@@ -146,36 +193,41 @@ export const fetchEmails = (): Promise<ParsedMail[]> => {
                     emails.push(emailWithCategory as ParsedMail);
 
                     if (category === "Interested") {
-                      await sendSlackNotification(
-                        `New interested email from: ${mail.from?.text}`,
-                      );
-                      await sendWebhookNotification(emailWithCategory);
+                      if (slackToken) {
+                        await sendSlackNotification(
+                          `New interested email from: ${mail.from?.text}`,
+                          slackToken,
+                          slackChannel || "#general",
+                        );
+                      }
+                      if (webhookUrl) {
+                        await sendWebhookNotification(emailWithCategory, webhookUrl);
+                      }
                     }
                   }
                 });
               });
-              msg.once("end", () => {
-                console.log(prefix + "Finished");
-              });
             });
+            msg.once("end", () => {
+              console.log(prefix + "Finished");
+            });
+          });
 
-            f.once("error", (err) => {
-              console.log("Fetch error: " + err);
-              reject(err);
-            });
+          f.once("error", (err) => {
+            console.log("Fetch error: " + err);
+            reject(err);
+          });
 
-            f.once("end", () => {
-              console.log("Done fetching all messages!");
-              imap.end();
-              resolve(emails);
-            });
+          f.once("end", () => {
+            console.log("Done fetching all messages!");
+            imap.end();
+            resolve(emails);
           });
         });
       });
     });
 
     imap.once("error", (err) => {
-      console.log("IMAP error:", err);
       reject(err);
     });
 

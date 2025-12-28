@@ -16,6 +16,7 @@ export interface User {
     slackToken?: string;
     slackChannel?: string;
     webhookUrl?: string;
+    openrouterApiKey?: string;
     huggingfaceApiKey?: string;
     elasticsearchHosts?: string;
   };
@@ -28,6 +29,7 @@ export interface ApiKeys {
   slackToken: string;
   slackChannel: string;
   webhookUrl: string;
+  openrouterApiKey: string;
   huggingfaceApiKey: string;
   elasticsearchHosts: string;
 }
